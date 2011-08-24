@@ -1,0 +1,28 @@
+#ifndef GENNUM_H
+#define GENNUM_H
+
+#include <linux/init.h>
+
+enum {
+        GN412X_FCL_BASE = 0xB00,
+        GN412X_FCL_CTRL = GN412X_FCL_BASE,
+        GN412X_FCL_STATUS = GN412X_FCL_BASE + 0x4,
+        GN412X_FCL_IODATA_IN = GN412X_FCL_BASE + 0x8,
+        GN412X_FCL_IODATA_OUT = GN412X_FCL_BASE + 0xC,
+        GN412X_FCL_EN = GN412X_FCL_BASE + 0x10,
+        GN412X_FCL_TIMER_0 = GN412X_FCL_BASE + 0x14,
+        GN412X_FCL_TIMER_1 = GN412X_FCL_BASE + 0x18,
+        GN412X_FCL_CLK_DIV = GN412X_FCL_BASE + 0x1C,
+        GN412X_FCL_IRQ = GN412X_FCL_BASE + 0x20,
+        GN412X_FCL_TIMER_CTRL = GN412X_FCL_BASE + 0x24,
+        GN412X_FCL_IM = GN412X_FCL_BASE + 0x28,
+        GN412X_FCL_TIMER2_0 = GN412X_FCL_BASE + 0x2C,
+        GN412X_FCL_TIMER2_1 = GN412X_FCL_BASE + 0x30,
+        GN412X_FCL_DBG_STS = GN412X_FCL_BASE + 0x34,
+        GN412X_FCL_FIFO = 0xE00,
+        PCI_SYS_CFG_SYSTEM = 0x800
+};
+
+int gennum_loader(void __iomem *, const void *, int);
+
+#endif
