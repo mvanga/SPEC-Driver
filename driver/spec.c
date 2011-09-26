@@ -155,8 +155,6 @@ static int spec_open(struct inode *inode, struct file *f)
 	dev->usecount++;
 	mutex_unlock(&dev->mutex);
 
-	printk("Spec Open!\n");
-
 	return 0;
 }
 
@@ -167,8 +165,6 @@ static int spec_release(struct inode *inode, struct file *f)
 	mutex_lock(&dev->mutex);
 	dev->usecount--;
 	mutex_unlock(&dev->mutex);
-
-	printk("Spec Close!\n");
 
 	return 0;
 }
@@ -193,7 +189,7 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		printk(KERN_INFO KBUILD_MODNAME "firmware: %d bytes\n",
+		printk(KERN_INFO KBUILD_MODNAME ": firmware: %d bytes\n",
 			fw.fwlen);
 		fwbuf = kmalloc(fw.fwlen, GFP_KERNEL);
 		if (fwbuf == NULL) {
@@ -215,6 +211,8 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			kfree(fwbuf);
 			break;
 		}
+		printk(KERN_INFO KBUILD_MODNAME
+			": loaded firmware successfully\n");
 
 		kfree(fwbuf);
 		break;
@@ -294,7 +292,8 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			dev->remap[i] = ioremap(r->start,
 						r->end - r->start + 1);
 		if (SPEC_DEBUG) {
-			printk("%s: BAR%i: %llx-%llx (size: 0x%llx) - %08lx\n",
+			printk(KERN_INFO KBUILD_MODNAME
+				": %s: BAR%i: %llx-%llx (size: 0x%llx) - %08lx\n",
 				__func__, i,
 				(long long)r->start,
 				(long long)r->end,
@@ -402,7 +401,8 @@ static int __init spec_init(void)
 		goto err_unchr;
 	}
 
-	printk(KERN_INFO "SPEC Driver, version " SPEC_VERSION ", init OK\n");
+	printk(KERN_INFO KBUILD_MODNAME ": SPEC driver version " SPEC_VERSION
+		": init OK\n");
 
 	return 0;
 
