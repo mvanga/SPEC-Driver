@@ -16,7 +16,10 @@
 #include "spec.h"
 #include "gennum.h"
 
-#define SPEC_VERSION			"22082011"
+#ifndef SPECMOD_VERSION
+#define SPECMOD_VERSION			0x2011
+#endif
+
 #define SPEC_MAX_MINORS			32
 
 #define SPEC_DEBUG			1
@@ -574,8 +577,8 @@ static int __init spec_init(void)
 		goto err_unchr;
 	}
 
-	printk(KERN_INFO KBUILD_MODNAME ": %s: SPEC driver version " SPEC_VERSION
-		": init OK\n", __func__);
+	printk(KERN_INFO KBUILD_MODNAME ": %s: SPEC driver version %08x"
+		": init OK\n", __func__, SPECMOD_VERSION);
 
 	return 0;
 
