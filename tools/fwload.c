@@ -3,6 +3,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <spec.h>
 
@@ -37,7 +39,7 @@ int main(int argc, char *argv[])
 	if (!buffer) {
 		fprintf(stderr, "Memory error!");
 		fclose(file);
-		return;
+		return -1;
 	}
 
 	fread(buffer, len, 1, file);
@@ -51,7 +53,7 @@ int main(int argc, char *argv[])
 	if (fd < 0)
 		return fd;
 	
-	ioctl(fd, SPEC_LOADFW, &fw);
+	ioctl(fd, SPEC_LOADFIRMWARE, &fw);
 
 	free(buffer);
 

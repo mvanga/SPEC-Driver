@@ -36,7 +36,10 @@ static DEFINE_MUTEX(spec_minors_mutex);
 
 static char *fwname = NULL;
 module_param(fwname, charp, 0000);
-MODULE_PARM_DESC(fwname, "The name of the firmware to load");
+MODULE_PARM_DESC(fwname, "The name of the firmware to load automatically");
+
+static int dmasize = SPEC_DEFAULT_DMABUFSIZE;
+module_param_named(bufsize, dmasize, int, 0);
 
 irqreturn_t spec_irq_handler(int irq, void *devid)
 {
@@ -50,31 +53,33 @@ irqreturn_t spec_irq_handler(int irq, void *devid)
 	return IRQ_HANDLED;
 }
 
-int spec_gennum_load(struct spec_dev *dev, const void *data, int size)
+int spec_gennum_load(void __iomem *bar4, const void *data, int size)
 {
 	int i, done = 0, wrote = 0;
 	unsigned long j;
-	void __iomem *bar4 = dev->remap[2];
 
 	/* Ok, now call register access, which lived elsewhere */
 	wrote = gennum_loader(bar4, data, size);
 	if (wrote < 0)
-	return wrote;
+		return wrote;
 
 	j = jiffies + 2 * HZ;
 	while(!done) {
 		i = readl(bar4 + GN412X_FCL_IRQ);
 		if (i & 0x8) {
-			printk("%s: %i: done after %i\n", __func__, __LINE__,
+			printk(KERN_INFO KBUILD_MODNAME 
+				": %s: done after %i\n", __func__,
 				wrote);
 			done = 1;
 		} else if( (i & 0x4) && !done) {
-			printk("%s: %i: error after %i\n", __func__, __LINE__,
+			printk(KERN_INFO KBUILD_MODNAME
+				": %s: error after %i\n", __func__,
 				wrote);
 			return -ETIMEDOUT;
 		}
 		if (time_after(jiffies, j)) {
-			printk("%s: %i: tout after %i\n", __func__, __LINE__,
+			printk(KERN_INFO KBUILD_MODNAME
+				": %s: timeout after %i\n", __func__,
 				wrote);
 			return -ETIMEDOUT;
 		}
@@ -98,7 +103,7 @@ void spec_complete_firmware(const struct firmware *fw, void *context)
 		return;
 	}
 
-	err = spec_gennum_load(dev, fw->data, fw->size);
+	err = spec_gennum_load(dev->remap[2], fw->data, fw->size);
 	if (err)
 		pr_err("%s: loading returned error %i\n", __func__, err);
 
@@ -118,11 +123,12 @@ void spec_load_firmware(struct work_struct *work)
 		return;
 	}
 	if (SPEC_DEBUG)
-		printk("%s: %s\n", __func__, fwname);
+		printk(KERN_INFO KBUILD_MODNAME ": %s: %s\n", __func__, fwname);
 
 	err = request_firmware_nowait(THIS_MODULE, 1, fwname, &pdev->dev,
 		dev, spec_complete_firmware);
-	printk("request_firmware returned %i\n", err);
+	printk(KERN_INFO KBUILD_MODNAME ": %s: request_firmware returned %i\n",
+		__func__, err);
 }
 
 void spec_request_firmware(struct spec_dev *dev)
@@ -169,6 +175,149 @@ static int spec_release(struct inode *inode, struct file *f)
 	return 0;
 }
 
+static int spec_mmap(struct file *f, struct vm_area_struct *vma)
+{
+	return -EOPNOTSUPP;
+}
+
+static ssize_t spec_read(struct file *f, char __user *buf, size_t count,
+		loff_t *offp)
+{
+	struct spec_dev *dev = f->private_data;
+	void *base;
+	loff_t pos = *offp;
+	int bar, off, size;
+	u32 low, high;
+
+	bar = SPEC_GET_BAR(pos) / 2; /* index in the array */
+	off = SPEC_GET_OFF(pos);
+	if (0)
+		printk("%s: pos %llx = bar %x off %x\n", __func__, pos,
+				bar*2, off);
+	if (!spec_is_valid_bar(pos))
+		return -EINVAL;
+
+	/* reading the DMA buffer is trivial, so do it first */
+	if (SPEC_IS_DMABUF(pos)) {
+		base = dev->dmabuf;
+		if (off >= dmasize)
+			return 0; /* EOF */
+		if (off + count > dmasize)
+			count = dmasize - off;
+		if (copy_to_user(buf, base + off, count))
+			return -EFAULT;
+		*offp += count;
+		return count;
+	}
+
+	/* inexistent or I/O ports: EINVAL */
+	if (!dev->remap[bar])
+		return -EINVAL;
+	base = dev->remap[bar];
+
+	/* valid on-board area: enforce sized access if size is 1,2,4,8 */
+	size = dev->area[bar]->end + 1 - dev->area[bar]->start;
+	if (off >= size)
+		return -EIO; /* it's not memory, an error is better than EOF */
+	if (count + off > size)
+		count = size - off;
+	switch (count) {
+		case 1:
+			if (put_user(readb(base + off), (u8 *)buf))
+				return -EFAULT;
+			break;
+		case 2:
+			if (put_user(readw(base + off), (u16 *)buf))
+				return -EFAULT;
+			break;
+		case 4:
+			if (put_user(readl(base + off), (u32 *)buf))
+				return -EFAULT;
+			break;
+		case 8:
+			low = readl(base + off);
+			high = readl(base + off + 1);
+			if (put_user(low + ((u64)high << 32), (u64 *)buf))
+				return -EFAULT;
+			break;
+		default:
+			if (copy_to_user(buf, base + off, count))
+				return -EFAULT;
+	}
+	*offp += count;
+	return count;
+}
+
+static ssize_t spec_write(struct file *f, const char __user *buf, size_t count,
+		loff_t *offp)
+{
+	struct spec_dev *dev = f->private_data;
+	void *base;
+	loff_t pos = *offp;
+	int bar, off, size;
+	union {u8 d8; u16 d16; u32 d32; u64 d64;} data;
+	bar = SPEC_GET_BAR(pos) / 2; /* index in the array */
+	off = SPEC_GET_OFF(pos);
+	if (!spec_is_valid_bar(pos))
+		return -EINVAL;
+
+	/* writing the DMA buffer is trivial, so do it first */
+	if (SPEC_IS_DMABUF(pos)) {
+		base = dev->dmabuf;
+		if (off >= dmasize)
+			return -ENOSPC;
+		if (off + count > dmasize)
+			count = dmasize - off;
+		if (copy_from_user(base + off, buf, count))
+			return -EFAULT;
+		*offp += count;
+		return count;
+	}
+
+	/* inexistent or I/O ports: EINVAL */
+	if (!dev->remap[bar])
+		return -EINVAL;
+	base = dev->remap[bar];
+
+	/* valid on-board area: enforce sized access if size is 1,2,4,8 */
+	size = dev->area[bar]->end + 1 - dev->area[bar]->start;
+	if (off >= size)
+		return -EIO; /* it's not memory, an error is better than EOF */
+	if (count + off > size)
+		count = size - off;
+	switch (count) {
+		case 1:
+			if (get_user(data.d8, (u8 *)buf))
+				return -EFAULT;
+			writeb(data.d8, base + off);
+			break;
+		case 2:
+			if (get_user(data.d16, (u16 *)buf))
+				return -EFAULT;
+			writew(data.d16, base + off);
+			break;
+		case 4:
+			if (get_user(data.d32, (u32 *)buf))
+				return -EFAULT;
+			writel(data.d32, base + off);
+			break;
+		case 8:
+			/* while put_user_8 exists, get_user_8 does not */
+			if (copy_from_user(&data.d64, buf, count))
+				return -EFAULT;
+			writel(data.d64, base + off);
+			writel(data.d64 >> 32, base + off + 4);
+			break;
+		default:
+			if (copy_from_user(base + off, buf, count))
+				return -EFAULT;
+	}
+	*offp += count;
+	return count;
+}
+
+
+
 static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	struct spec_dev *dev = f->private_data;
@@ -180,7 +329,7 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	mutex_lock(&dev->mutex);
 
 	switch (cmd) {
-	case SPEC_LOADFW:
+	case SPEC_LOADFIRMWARE:
 		if (copy_from_user(&fw, argp, sizeof(fw))) {
 			ret = -EFAULT;
 			break;
@@ -189,8 +338,8 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		printk(KERN_INFO KBUILD_MODNAME ": firmware: %d bytes\n",
-			fw.fwlen);
+		printk(KERN_INFO KBUILD_MODNAME ": %s: firmware: %d bytes\n",
+			__func__, fw.fwlen);
 		fwbuf = kmalloc(fw.fwlen, GFP_KERNEL);
 		if (fwbuf == NULL) {
 			ret = -ENOMEM;
@@ -198,21 +347,23 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		}
 		if (copy_from_user(fwbuf, fw.data, fw.fwlen)) {
 			printk(KERN_ERR KBUILD_MODNAME
-				"failed to copy firmware from user space\n");
+				": %s: failed to copy firmware from user space\n",
+				__func__);
 			ret = -EFAULT;
 			kfree(fwbuf);
 			break;
 		}
-		ret = gennum_loader(dev->remap[2], (const void *)fwbuf,
+		ret = spec_gennum_load(dev->remap[2], (const void *)fwbuf,
 			fw.fwlen);
 		if (ret < 0) {
 			printk(KERN_ERR KBUILD_MODNAME
-				"failed to load firmware: error %d\n", ret);
+				": %s: failed to load firmware: error %d\n",
+				__func__, ret);
 			kfree(fwbuf);
 			break;
 		}
 		printk(KERN_INFO KBUILD_MODNAME
-			": loaded firmware successfully\n");
+			": %s: loaded firmware successfully\n", __func__);
 
 		kfree(fwbuf);
 		break;
@@ -226,6 +377,9 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 struct file_operations spec_file_ops = {
 	.open = spec_open,
 	.release = spec_release,
+	.mmap = spec_mmap,
+	.read = spec_read,
+	.write = spec_write,
 	.unlocked_ioctl = spec_ioctl,
 };
 
@@ -249,6 +403,21 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	init_waitqueue_head(&dev->irq_queue);
 	cdev_init(&dev->cdev, &spec_file_ops);
 	mutex_init(&dev->mutex);
+
+	if (dmasize > SPEC_MAX_DMABUFSIZE) {
+		printk(KERN_WARNING KBUILD_MODNAME
+			": %s: DMA buffer size too big, using 0x%x\n",
+			__func__,
+			SPEC_MAX_DMABUFSIZE);
+		dmasize = SPEC_MAX_DMABUFSIZE;
+	}
+
+	dev->dmabuf = __vmalloc(dmasize, GFP_KERNEL | __GFP_ZERO,
+			PAGE_KERNEL);
+	if (!dev->dmabuf) {
+		ret = -ENOMEM;
+		goto err_dmaalloc;
+	}
 
 	mutex_lock(&spec_minors_mutex);
 	minor = spec_get_free();
@@ -336,6 +505,8 @@ err_enable:
 	spec_minors[minor] = 0;
 	mutex_unlock(&spec_minors_mutex);
 err_dis:
+	kfree(dev->dmabuf);
+err_dmaalloc:
 	kfree(dev);
 err_alloc:
 	return ret;
@@ -360,6 +531,7 @@ static void spec_remove(struct pci_dev *pdev)
 	release_firmware(dev->fw);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
+	vfree(dev->dmabuf);
 	kfree(dev);
 }
 
@@ -384,25 +556,26 @@ static int __init spec_init(void)
 	spec_class = class_create(THIS_MODULE, "spec");
 	if (IS_ERR(spec_class)) {
 		ret = PTR_ERR(spec_class);
-		printk(KERN_ERR "can't register spec class\n");
+		printk(KERN_ERR KBUILD_MODNAME ": can't register spec class\n");
 		goto err;
 	}
 
 	ret = alloc_chrdev_region(&dev, 0, SPEC_MAX_MINORS, "spec");
 	if (ret) {
-		printk(KERN_ERR "can't register character device\n");
+		printk(KERN_ERR KBUILD_MODNAME
+			": can't register character device\n");
 		goto err_attr;
 	}
 	spec_major = MAJOR(dev);
 
 	ret = pci_register_driver(&spec_pci_driver);
 	if (ret) {
-		printk(KERN_ERR "can't register pci driver\n");
+		printk(KERN_ERR KBUILD_MODNAME ": can't register pci driver\n");
 		goto err_unchr;
 	}
 
-	printk(KERN_INFO KBUILD_MODNAME ": SPEC driver version " SPEC_VERSION
-		": init OK\n");
+	printk(KERN_INFO KBUILD_MODNAME ": %s: SPEC driver version " SPEC_VERSION
+		": init OK\n", __func__);
 
 	return 0;
 

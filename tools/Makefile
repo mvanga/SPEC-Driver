@@ -1,9 +1,11 @@
-TOOLS=fwload
+TOOLS=fwload.elf testread.elf testwrite.elf
+
+CFLAGS=-I../driver -ggdb -Wall -Wextra
 
 all: $(TOOLS)
 
-fwload: fwload.c
-	gcc -ggdb fwload.c -I../driver -o fwload
+%.elf: %.c
+	$(CC) $(CFLAGS) $^ -o $@
 
 clean:
 	rm -rf *.o $(TOOLS)
