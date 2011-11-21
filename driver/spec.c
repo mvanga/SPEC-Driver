@@ -13,6 +13,7 @@
 #include <linux/ioctl.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
+#include <linux/fs.h>
 
 #include "spec.h"
 #include "gennum.h"
