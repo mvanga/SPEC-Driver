@@ -1,4 +1,4 @@
-TOOLS=fwload.elf testread.elf testwrite.elf
+TOOLS=fwload testread testwrite
 
 CFLAGS=-I../driver -ggdb -Wall -Wextra
 
