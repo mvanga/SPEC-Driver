@@ -12,6 +12,7 @@
 #include <linux/device.h>
 #include <linux/ioctl.h>
 #include <linux/uaccess.h>
+#include <linux/sched.h>
 
 #include "spec.h"
 #include "gennum.h"
