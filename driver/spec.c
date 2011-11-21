@@ -70,18 +70,18 @@ int spec_gennum_load(void __iomem *bar4, const void *data, int size)
 	while(!done) {
 		i = readl(bar4 + GN412X_FCL_IRQ);
 		if (i & 0x8) {
-			printk(KERN_INFO KBUILD_MODNAME 
+			pr_info(KBUILD_MODNAME
 				": %s: done after %i\n", __func__,
 				wrote);
 			done = 1;
 		} else if( (i & 0x4) && !done) {
-			printk(KERN_INFO KBUILD_MODNAME
+			pr_info(KBUILD_MODNAME
 				": %s: error after %i\n", __func__,
 				wrote);
 			return -ETIMEDOUT;
 		}
 		if (time_after(jiffies, j)) {
-			printk(KERN_INFO KBUILD_MODNAME
+			pr_info(KBUILD_MODNAME
 				": %s: timeout after %i\n", __func__,
 				wrote);
 			return -ETIMEDOUT;
@@ -98,17 +98,18 @@ void spec_complete_firmware(const struct firmware *fw, void *context)
 	dev->fw = fw;
 
 	if (fw) {
-		pr_info("%s: %p: size %i (0x%x), data %p\n", __func__, fw,
-			fw ? fw->size : 0, fw ? fw->size : 0,
+		pr_info(KBUILD_MODNAME ": %s: %p: size %i (0x%x), data %p\n",
+			__func__, fw, fw ? fw->size : 0, fw ? fw->size : 0,
 			fw ? fw->data : 0);
 	} else {
-		pr_warning("%s: no firmware\n", __func__);
+		pr_warning(KBUILD_MODNAME ": %s: no firmware\n", __func__);
 		return;
 	}
 
 	err = spec_gennum_load(dev->remap[2], fw->data, fw->size);
 	if (err)
-		pr_err("%s: loading returned error %i\n", __func__, err);
+		pr_err(KBUILD_MODNAME ": %s: loading returned error %i\n",
+			__func__, err);
 
 	release_firmware(dev->fw);
 	dev->fw = NULL;
@@ -126,18 +127,19 @@ void spec_load_firmware(struct work_struct *work)
 		return;
 	}
 	if (SPEC_DEBUG)
-		printk(KERN_INFO KBUILD_MODNAME ": %s: %s\n", __func__, fwname);
+		pr_info(KBUILD_MODNAME ": %s: %s\n", __func__, fwname);
 
 	err = request_firmware_nowait(THIS_MODULE, 1, fwname, &pdev->dev,
 		dev, spec_complete_firmware);
-	printk(KERN_INFO KBUILD_MODNAME ": %s: request_firmware returned %i\n",
+	pr_info(KBUILD_MODNAME ": %s: request_firmware returned %i\n",
 		__func__, err);
 }
 
 void spec_request_firmware(struct spec_dev *dev)
 {
 	if (dev->fw) {
-		pr_err("firmware loading already in progress\n");
+		pr_err(KBUILD_MODNAME
+			": firmware loading already in progress\n");
 		return;
 	}
 	schedule_work(&dev->work);
@@ -195,8 +197,8 @@ static ssize_t spec_read(struct file *f, char __user *buf, size_t count,
 	bar = SPEC_GET_BAR(pos) / 2; /* index in the array */
 	off = SPEC_GET_OFF(pos);
 	if (0)
-		printk("%s: pos %llx = bar %x off %x\n", __func__, pos,
-				bar*2, off);
+		pr_info(KBUILD_MODNAME ": %s: pos %llx = bar %x off %x\n",
+			__func__, pos, bar*2, off);
 	if (!spec_is_valid_bar(pos))
 		return -EINVAL;
 
@@ -341,7 +343,7 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 			break;
 		}
-		printk(KERN_INFO KBUILD_MODNAME ": %s: firmware: %d bytes\n",
+		pr_info(KBUILD_MODNAME ": %s: firmware: %d bytes\n",
 			__func__, fw.fwlen);
 		fwbuf = kmalloc(fw.fwlen, GFP_KERNEL);
 		if (fwbuf == NULL) {
@@ -349,7 +351,7 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			break;
 		}
 		if (copy_from_user(fwbuf, fw.data, fw.fwlen)) {
-			printk(KERN_ERR KBUILD_MODNAME
+			pr_err(KBUILD_MODNAME
 				": %s: failed to copy firmware from user space\n",
 				__func__);
 			ret = -EFAULT;
@@ -359,13 +361,13 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		ret = spec_gennum_load(dev->remap[2], (const void *)fwbuf,
 			fw.fwlen);
 		if (ret < 0) {
-			printk(KERN_ERR KBUILD_MODNAME
+			pr_err(KBUILD_MODNAME
 				": %s: failed to load firmware: error %d\n",
 				__func__, ret);
 			kfree(fwbuf);
 			break;
 		}
-		printk(KERN_INFO KBUILD_MODNAME
+		pr_info(KBUILD_MODNAME
 			": %s: loaded firmware successfully\n", __func__);
 
 		kfree(fwbuf);
@@ -435,7 +437,7 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		i = request_irq(pdev->irq, spec_irq_handler, IRQF_SHARED,
 				driver_name, dev);
 		if (i < 0)
-			printk(KERN_ERR KBUILD_MODNAME
+			pr_err(KBUILD_MODNAME
 				"can't request irq %i, error %i\n",
 				pdev->irq, i);
 		else
@@ -464,7 +466,7 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			dev->remap[i] = ioremap(r->start,
 						r->end - r->start + 1);
 		if (SPEC_DEBUG) {
-			printk(KERN_INFO KBUILD_MODNAME
+			pr_info(KBUILD_MODNAME
 				": %s: BAR%i: %llx-%llx (size: 0x%llx) - %08lx\n",
 				__func__, i,
 				(long long)r->start,
@@ -559,13 +561,13 @@ static int __init spec_init(void)
 	spec_class = class_create(THIS_MODULE, "spec");
 	if (IS_ERR(spec_class)) {
 		ret = PTR_ERR(spec_class);
-		printk(KERN_ERR KBUILD_MODNAME ": can't register spec class\n");
+		pr_err(KBUILD_MODNAME ": can't register spec class\n");
 		goto err;
 	}
 
 	ret = alloc_chrdev_region(&dev, 0, SPEC_MAX_MINORS, "spec");
 	if (ret) {
-		printk(KERN_ERR KBUILD_MODNAME
+		pr_err(KBUILD_MODNAME
 			": can't register character device\n");
 		goto err_attr;
 	}
@@ -573,11 +575,11 @@ static int __init spec_init(void)
 
 	ret = pci_register_driver(&spec_pci_driver);
 	if (ret) {
-		printk(KERN_ERR KBUILD_MODNAME ": can't register pci driver\n");
+		pr_err(KBUILD_MODNAME ": can't register pci driver\n");
 		goto err_unchr;
 	}
 
-	printk(KERN_INFO KBUILD_MODNAME ": %s: SPEC driver version %08x"
+	pr_info(KBUILD_MODNAME ": %s: SPEC driver version %08x"
 		": init OK\n", __func__, SPECMOD_VERSION);
 
 	return 0;

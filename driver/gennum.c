@@ -77,7 +77,7 @@ int gennum_loader(void __iomem *bar4, const void *data, int size8)
 	/* confirm the reset */
 	i = readl(bar4 + GN412X_FCL_CTRL);
 	if (i != 0x40) {
-		printk(KERN_ERR "%s: %i: error\n", __func__, __LINE__);
+		pr_err(KBUILD_MODNAME ": %s: %i: error\n", __func__, __LINE__);
 		return -EIO;
 	}
 	writel(0x00, bar4 + GN412X_FCL_CTRL); /* clear the reset bit */
@@ -122,11 +122,11 @@ int gennum_loader(void __iomem *bar4, const void *data, int size8)
 		i = readl(bar4 + GN412X_FCL_IRQ);
 		if ((i & 8) && wrote) {
 			done = 1;
-			printk("%s: %i: done after %i\n", __func__, __LINE__,
-				wrote);
+			pr_info(KBUILD_MODNAME ": %s: %i: done after %i\n", __func__,
+				__LINE__, wrote);
 		} else if ((i & 0x4) && !done) {
-			printk("%s: %i: error after %i\n", __func__, __LINE__,
-				wrote);
+			pr_err(KBUILD_MODNAME ": %s: %i: error after %i\n", __func__,
+				__LINE__, wrote);
 			return -EIO;
 		}
 
