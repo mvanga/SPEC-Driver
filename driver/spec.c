@@ -131,8 +131,13 @@ void spec_load_firmware(struct work_struct *work)
 	if (SPEC_DEBUG)
 		pr_info(KBUILD_MODNAME ": %s: %s\n", __func__, fwname);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33)
 	err = request_firmware_nowait(THIS_MODULE, 1, fwname, &pdev->dev,
 		dev, spec_complete_firmware);
+#else
+	err = request_firmware_nowait(THIS_MODULE, 1, fwname, &pdev->dev,
+		GFP_KERNEL, dev, spec_complete_firmware);
+#endif
 	pr_info(KBUILD_MODNAME ": %s: request_firmware returned %i\n",
 		__func__, err);
 }
