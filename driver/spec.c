@@ -122,7 +122,7 @@ void spec_load_firmware(struct work_struct *work)
 	static char fwname[SPEC_MAX_FWNAME_SIZE];
 	int err;
 
-	if (!fwname) {
+	if (!(*fwname)) {
 		dev_err(&pdev->dev, "no fwname specified\n");
 		return;
 	}
