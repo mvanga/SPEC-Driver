@@ -46,6 +46,9 @@ struct spec_fw {
 #define SPEC_BAR_2		0x20000000
 #define SPEC_BAR_4		0x40000000
 #define SPEC_BAR_BUF		0xc0000000
+
+#ifdef __KERNEL__
+
 #define SPEC_IS_DMABUF(addr)	((addr) >= SPEC_BAR_BUF)
 #define SPEC_GET_BAR(x)		((x) >> 28)
 #define SPEC_SET_BAR(x)		((x) << 28)
@@ -63,6 +66,7 @@ static inline int spec_is_dmabuf_bar(unsigned long address)
 	return bar == 0x0c;
 }
 
+#endif
 
 #define __SPEC_IOC_MAGIC 'S'
 
