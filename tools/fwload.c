@@ -11,7 +11,6 @@
 int main(int argc, char *argv[])
 {
 	int fd;
-	int ret;
 	struct spec_fw fw;
 	FILE *file;
 	int len;
@@ -58,5 +57,5 @@ int main(int argc, char *argv[])
 	free(buffer);
 
 	close(fd);
-	return ret;
+	return 0;
 }
