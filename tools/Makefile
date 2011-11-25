@@ -1,6 +1,6 @@
-TOOLS=fwload testread testwrite
+TOOLS=fwload testread testwrite configload
 
-CFLAGS=-I../driver -ggdb -Wall -Wextra
+CFLAGS=-I../driver -I../../wishbone/simulation/include -ggdb -Wall -Wextra
 
 all: $(TOOLS)
 

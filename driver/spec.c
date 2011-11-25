@@ -46,6 +46,112 @@ MODULE_PARM_DESC(fwname, "The name of the firmware to load automatically");
 static int dmasize = SPEC_DEFAULT_DMABUFSIZE;
 module_param_named(bufsize, dmasize, int, 0);
 
+#ifdef SPEC_DEMO_CONFIG
+struct firmware config_space;
+#endif
+
+uint8_t spec_wb_read8(struct wb_bus *bus, wb_addr_t addr)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	return readb(sdev->remap[0] + addr);
+}
+
+uint16_t spec_wb_read16(struct wb_bus *bus, wb_addr_t addr)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	return readw(sdev->remap[0] + addr);
+}
+
+uint32_t spec_wb_read32(struct wb_bus *bus, wb_addr_t addr)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	return readl(sdev->remap[0] + addr);
+}
+
+uint64_t spec_wb_read64(struct wb_bus *bus, wb_addr_t addr)
+{
+	uint32_t upper, lower;
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	lower = readl(sdev->remap[0] + addr);
+	upper = readl(sdev->remap[0] + addr + 4);
+
+	return (((uint64_t)upper << 32) | lower);
+}
+
+void spec_wb_write8(struct wb_bus *bus, wb_addr_t addr, uint8_t val)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	writeb(val, sdev->remap[0] + addr);
+}
+
+void spec_wb_write16(struct wb_bus *bus, wb_addr_t addr, uint16_t val)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	writew(val, sdev->remap[0] + addr);
+}
+
+void spec_wb_write32(struct wb_bus *bus, wb_addr_t addr, uint32_t val)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	writel(val, sdev->remap[0] + addr);
+}
+
+void spec_wb_write64(struct wb_bus *bus, wb_addr_t addr, uint64_t val)
+{
+	struct spec_dev *sdev = bus_to_spec_dev(bus);
+
+	writel(val, sdev->remap[0] + addr);
+	writel(val >> 32, sdev->remap[0] + addr);
+}
+
+void *spec_memcpy_from_wb(struct wb_bus *bus, wb_addr_t addr, void *buf, size_t len)
+{
+	int i;
+	uint8_t *bytes = (uint8_t *)buf;
+	for (i = 0; i < len; i++)
+		*bytes++ = spec_wb_read8(bus, addr + i);
+	return buf;
+}
+
+void *spec_memcpy_to_wb(struct wb_bus *bus, wb_addr_t addr, const void *buf, size_t len)
+{
+	int i;
+	uint8_t *bytes = (uint8_t *)buf;
+	for (i = 0; i < len; i++)
+		spec_wb_write8(bus, *bytes++, addr + i);
+	return (void *)buf;
+}
+
+void *spec_wb_read_cfg(struct wb_bus *bus, wb_addr_t addr, void *buf, size_t len)
+{
+#ifdef SPEC_DEMO_CONFIG
+	memcpy(buf, &config_space.data[addr], len);
+	return buf;
+#endif
+	return NULL;
+}
+
+struct wb_ops spec_wb_ops = {
+	.read8 = spec_wb_read8,
+	.read16 = spec_wb_read16,
+	.read32 = spec_wb_read32,
+	.read64 = spec_wb_read64,
+	.write8 = spec_wb_write8,
+	.write16 = spec_wb_write16,
+	.write32 = spec_wb_write32,
+	.write64 = spec_wb_write64,
+	.memcpy_from_wb = spec_memcpy_from_wb,
+	.memcpy_to_wb = spec_memcpy_to_wb,
+	.read_cfg = spec_wb_read_cfg,
+};
+
 irqreturn_t spec_irq_handler(int irq, void *devid)
 {
 	struct spec_dev *dev = (struct spec_dev *)devid;
@@ -58,10 +164,12 @@ irqreturn_t spec_irq_handler(int irq, void *devid)
 	return IRQ_HANDLED;
 }
 
-int spec_gennum_load(void __iomem *bar4, const void *data, int size)
+int spec_gennum_load(struct spec_dev *dev, const void *data, int size)
 {
 	int i, done = 0, wrote = 0;
+	int err;
 	unsigned long j;
+	void __iomem *bar4 = dev->remap[2];
 
 	/* Ok, now call register access, which lived elsewhere */
 	wrote = gennum_loader(bar4, data, size);
@@ -89,6 +197,29 @@ int spec_gennum_load(void __iomem *bar4, const void *data, int size)
 			return -ETIMEDOUT;
 		}
 	}
+
+	/*
+	 * Register the device as a wishbone controller
+	 *
+	 * Here, we would in practice, read the location of the SDWB header
+	 * from a register in PCI memory. For now we just use a demo firmware
+	 * with the header information to test things out.
+	 */
+	dev->wb_bus.name = (char *)driver_name;
+	dev->wb_bus.owner = THIS_MODULE;
+	dev->wb_bus.ops = &spec_wb_ops;
+
+	/* The wb_cfggen tool sets the header base address to a default of 0 */
+	dev->wb_bus.sdwb_header_base = 0;
+
+	err = wb_register_bus(&dev->wb_bus);
+	if (err) {
+		pr_err(KBUILD_MODNAME ": failed to register wishbone bus\n");
+		return err;
+	}
+
+	dev->bus_registered = 1;
+
 	return 0;
 }
 
@@ -108,7 +239,7 @@ void spec_complete_firmware(const struct firmware *fw, void *context)
 		return;
 	}
 
-	err = spec_gennum_load(dev->remap[2], fw->data, fw->size);
+	err = spec_gennum_load(dev, fw->data, fw->size);
 	if (err)
 		pr_err(KBUILD_MODNAME ": %s: loading returned error %i\n",
 			__func__, err);
@@ -341,7 +472,8 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	mutex_lock(&dev->mutex);
 
 	switch (cmd) {
-	case SPEC_LOADFIRMWARE:
+#ifdef SPEC_DEMO_CONFIG
+	case SPEC_LOAD_DEMO_CONFIG:
 		if (copy_from_user(&fw, argp, sizeof(fw))) {
 			ret = -EFAULT;
 			break;
@@ -365,7 +497,44 @@ static long spec_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			kfree(fwbuf);
 			break;
 		}
-		ret = spec_gennum_load(dev->remap[2], (const void *)fwbuf,
+		config_space.size = fw.fwlen;
+		config_space.data = fwbuf;
+		pr_info(KBUILD_MODNAME ": loaded demo config space firmware\n");
+		break;
+#endif
+	case SPEC_LOAD_FIRMWARE:
+#ifdef SPEC_DEMO_CONFIG
+		if (config_space.size == 0) {
+			pr_err(KBUILD_MODNAME ": demo config space not set. "
+				"use SPEC_LOAD_DEMO_CONFIG ioctl.\n");
+			ret = -EFAULT;
+			break;
+		}
+#endif
+		if (copy_from_user(&fw, argp, sizeof(fw))) {
+			ret = -EFAULT;
+			break;
+		}
+		if (fw.fwlen == 0) {
+			ret = -EFAULT;
+			break;
+		}
+		pr_info(KBUILD_MODNAME ": %s: firmware: %d bytes\n",
+			__func__, fw.fwlen);
+		fwbuf = kmalloc(fw.fwlen, GFP_KERNEL);
+		if (fwbuf == NULL) {
+			ret = -ENOMEM;
+			break;
+		}
+		if (copy_from_user(fwbuf, fw.data, fw.fwlen)) {
+			pr_err(KBUILD_MODNAME
+				": %s: failed to copy firmware from user space\n",
+				__func__);
+			ret = -EFAULT;
+			kfree(fwbuf);
+			break;
+		}
+		ret = spec_gennum_load(dev, (const void *)fwbuf,
 			fw.fwlen);
 		if (ret < 0) {
 			pr_err(KBUILD_MODNAME
@@ -417,7 +586,7 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mutex_init(&dev->mutex);
 
 	if (dmasize > SPEC_MAX_DMABUFSIZE) {
-		printk(KERN_WARNING KBUILD_MODNAME
+		pr_warning(KBUILD_MODNAME
 			": %s: DMA buffer size too big, using 0x%x\n",
 			__func__,
 			SPEC_MAX_DMABUFSIZE);
@@ -499,7 +668,6 @@ static int spec_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 #endif
 		dev_err(&pdev->dev, "can't create device\n");
 
-
 	if (fwname)
 		spec_request_firmware(dev);
 
@@ -529,6 +697,9 @@ static void spec_remove(struct pci_dev *pdev)
 	int i;
 	struct spec_dev *dev = pci_get_drvdata(pdev);
 	unsigned int minor = MINOR(dev->cdev.dev);
+
+	if (dev->bus_registered)
+		wb_unregister_bus(&dev->wb_bus);
 
 	device_destroy(spec_class, MKDEV(spec_major, minor));
 
@@ -606,6 +777,11 @@ static void __exit spec_exit(void)
 	unregister_chrdev_region(MKDEV(spec_major, 0), SPEC_MAX_MINORS);
 
 	class_destroy(spec_class);
+
+#ifdef SPEC_DEMO_CONFIG
+	if (config_space.size != 0)
+		kfree(config_space.data);
+#endif
 }
 
 module_init(spec_init);

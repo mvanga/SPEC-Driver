@@ -30,6 +30,11 @@ int main(int argc, char *argv[])
 	/* read in the firmware file */
 	file = fopen(argv[2], "rw");
 
+	if (!file) {
+		printf("failed to open file: %s\n", argv[2]);
+		return 1;
+	}
+
 	fseek(file, 0, SEEK_END);
 	len = ftell(file);
 	fseek(file, 0, SEEK_SET);
@@ -52,7 +57,7 @@ int main(int argc, char *argv[])
 	if (fd < 0)
 		return fd;
 	
-	ioctl(fd, SPEC_LOADFIRMWARE, &fw);
+	ioctl(fd, SPEC_LOAD_FIRMWARE, &fw);
 
 	free(buffer);
 

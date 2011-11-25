@@ -1,10 +1,11 @@
 #ifndef CERN_SPEC_H
 #define CERN_SPEC_H
 
+#ifdef __KERNEL__
+
 #include <linux/types.h>
 #include <linux/ioctl.h>
-
-#ifdef __KERNEL__
+#include <linux/wishbone.h>
 
 #define SPEC_FLAG_IRQREQUEST	(1 << 0)
 
@@ -32,7 +33,13 @@ struct spec_dev {
 	struct timespec irqtime;
 	unsigned long irqcount;
 	wait_queue_head_t irq_queue;
+
+	struct wb_bus wb_bus;
+	int bus_registered;
 };
+
+#define bus_to_spec_dev(bus) \
+	container_of(bus, struct spec_dev, wb_bus)
 
 #endif
 
@@ -70,6 +77,7 @@ static inline int spec_is_dmabuf_bar(unsigned long address)
 
 #define __SPEC_IOC_MAGIC 'S'
 
-#define SPEC_LOADFIRMWARE	_IOW(__SPEC_IOC_MAGIC, 0, struct spec_fw)
+#define SPEC_LOAD_FIRMWARE	_IOW(__SPEC_IOC_MAGIC, 0, struct spec_fw)
+#define SPEC_LOAD_DEMO_CONFIG	_IOW(__SPEC_IOC_MAGIC, 1, struct spec_fw)
 
 #endif /* CERN_SPEC_H */
