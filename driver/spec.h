@@ -73,7 +73,7 @@ static inline int spec_is_dmabuf_bar(unsigned long address)
 	return bar == 0x0c;
 }
 
-#endif
+#endif /* __KERNEL__ */
 
 #define __SPEC_IOC_MAGIC 'S'
 
